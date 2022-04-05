@@ -561,73 +561,6 @@ class StandaloneIntegrationTests(ProcessIntegrationTest):
             self.assertEqual(200, requests.get("http://127.0.0.1:%i/" % port, timeout=1).status_code)
             proc.terminate()
 
-    def test_input(self):
-        LOCUSTFILE_CONTENT = textwrap.dedent(
-            """
-        from locust import User, TaskSet, task, between
-
-        class UserSubclass(User):
-            wait_time = between(0.2, 0.8)
-            @task
-            def t(self):
-                print("Test task is running")
-        """
-        )
-        with mock_locustfile(content=LOCUSTFILE_CONTENT) as mocked:
-            stdin_m, stdin_s = pty.openpty()
-            stdin = os.fdopen(stdin_m, "wb", 0)
-
-            proc = subprocess.Popen(
-                " ".join(
-                    [
-                        "locust",
-                        "-f",
-                        mocked.file_path,
-                        "--headless",
-                        "--run-time",
-                        "7s",
-                        "-u",
-                        "0",
-                        "--loglevel",
-                        "INFO",
-                    ]
-                ),
-                stderr=STDOUT,
-                stdin=stdin_s,
-                stdout=PIPE,
-                shell=True,
-            )
-            gevent.sleep(1)
-
-            stdin.write(b"w")
-            gevent.sleep(1)
-            stdin.write(b"W")
-            gevent.sleep(1)
-            stdin.write(b"s")
-            gevent.sleep(1)
-            stdin.write(b"S")
-            gevent.sleep(1)
-
-            # This should not do anything since we are already at zero users
-            stdin.write(b"S")
-            gevent.sleep(1)
-
-            output = proc.communicate()[0].decode("utf-8")
-            stdin.close()
-            self.assertIn("Ramping to 1 users at a rate of 100.00 per second", output)
-            self.assertIn('All users spawned: {"UserSubclass": 1} (1 total users)', output)
-            self.assertIn("Ramping to 11 users at a rate of 100.00 per second", output)
-            self.assertIn('All users spawned: {"UserSubclass": 11} (11 total users)', output)
-            self.assertIn("Ramping to 10 users at a rate of 100.00 per second", output)
-            self.assertIn('All users spawned: {"UserSubclass": 10} (10 total users)', output)
-            self.assertIn("Ramping to 0 users at a rate of 100.00 per second", output)
-            self.assertIn('All users spawned: {"UserSubclass": 0} (0 total users)', output)
-            self.assertIn("Test task is running", output)
-            # ensure stats printer printed at least one report before shutting down and that there was a final report printed as well
-            self.assertRegex(output, r".*Aggregated[\S\s]*Shutting down[\S\s]*Aggregated.*")
-            self.assertIn("Shutting down (exit code 0)", output)
-            self.assertEqual(0, proc.returncode)
-
     def test_spawning_with_fixed(self):
         LOCUSTFILE_CONTENT = textwrap.dedent(
             """
@@ -999,3 +932,118 @@ class SecondUser(HttpUser):
 
             self.assertEqual(0, proc.returncode)
             self.assertEqual(0, proc_worker.returncode)
+
+
+class KeyboardInputTests(ProcessIntegrationTest):
+    def test_input(self):
+        LOCUSTFILE_CONTENT = textwrap.dedent(
+            """
+        from locust import User, TaskSet, task, between
+
+        class UserSubclass(User):
+            wait_time = between(0.2, 0.8)
+            @task
+            def t(self):
+                print("Test task is running")
+        """
+        )
+        with mock_locustfile(content=LOCUSTFILE_CONTENT) as mocked:
+            stdin_m, stdin_s = pty.openpty()
+            stdin = os.fdopen(stdin_m, "wb", 0)
+
+            proc = subprocess.Popen(
+                " ".join(
+                    [
+                        "locust",
+                        "-f",
+                        mocked.file_path,
+                        "--headless",
+                        "--run-time",
+                        "7s",
+                        "-u",
+                        "0",
+                        "--loglevel",
+                        "INFO",
+                    ]
+                ),
+                stderr=STDOUT,
+                stdin=stdin_s,
+                stdout=PIPE,
+                shell=True,
+            )
+            gevent.sleep(1)
+
+            stdin.write(b"w")
+            gevent.sleep(1)
+            stdin.write(b"W")
+            gevent.sleep(1)
+            stdin.write(b"s")
+            gevent.sleep(1)
+            stdin.write(b"S")
+            gevent.sleep(1)
+
+            # This should not do anything since we are already at zero users
+            stdin.write(b"S")
+            gevent.sleep(1)
+
+            output = proc.communicate()[0].decode("utf-8")
+            stdin.close()
+            self.assertIn("Ramping to 1 users at a rate of 100.00 per second", output)
+            self.assertIn('All users spawned: {"UserSubclass": 1} (1 total users)', output)
+            self.assertIn("Ramping to 11 users at a rate of 100.00 per second", output)
+            self.assertIn('All users spawned: {"UserSubclass": 11} (11 total users)', output)
+            self.assertIn("Ramping to 10 users at a rate of 100.00 per second", output)
+            self.assertIn('All users spawned: {"UserSubclass": 10} (10 total users)', output)
+            self.assertIn("Ramping to 0 users at a rate of 100.00 per second", output)
+            self.assertIn('All users spawned: {"UserSubclass": 0} (0 total users)', output)
+            self.assertIn("Test task is running", output)
+            # ensure stats printer printed at least one report before shutting down and that there was a final report printed as well
+            self.assertRegex(output, r".*Aggregated[\S\s]*Shutting down[\S\s]*Aggregated.*")
+            self.assertIn("Shutting down (exit code 0)", output)
+            self.assertEqual(0, proc.returncode)
+
+    def test_input_terminal_restored(self):
+        LOCUSTFILE_CONTENT = textwrap.dedent(
+            """
+        from locust import User, TaskSet, task, between, events
+        import os
+
+        class UserSubclass(User):
+            @task
+            def t(self):
+                pass
+
+        @events.quitting.add_listener
+        def _(environment, **_kwargs):
+            # quit hard to test that exit handler is run anyway
+            os._exit(0)
+        """
+        )
+        print(LOCUSTFILE_CONTENT)
+        with mock_locustfile(content=LOCUSTFILE_CONTENT) as mocked:
+            stdin_m, stdin_s = pty.openpty()
+            stdin = os.fdopen(stdin_m, "wb", 0)
+
+            proc = subprocess.Popen(
+                " ".join(
+                    [
+                        "locust",
+                        "-f",
+                        mocked.file_path,
+                        "--headless",
+                        "--run-time",
+                        "1s",
+                        "--loglevel",
+                        "INFO",
+                    ]
+                )
+                + "stty | grep -- '-echoe'",  # check that terminal was restored
+                stderr=STDOUT,
+                stdin=stdin_s,
+                stdout=PIPE,
+                shell=True,
+            )
+            gevent.sleep(1)
+            output = proc.communicate()[0].decode("utf-8")
+            # ensure grep found a match
+            self.assertEqual(0, proc.returncode)
